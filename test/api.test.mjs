@@ -178,13 +178,14 @@ test("send failure carries a classification, never a fake success", async () => 
 
 test("all three failure classes are distinguishable at the endpoint", async () => {
   const cases = [
-    [, new Error("no live response_url for this chat"), "reply-window-closed"],
-    ["reply-window-closed", "reply-window-closed"],
-    [null, new Error("socket hang up"), "other"],
-    [null, new Error("errcode 45015 response timeout"), "reply-window-closed"],
-    [null, new Error("errcode 40164 invalid ip"), "ip-not-allowed"],
+    [new Error("no live response_url for this chat"), "reply-window-closed"],
+    [new Error("socket hang up"), "other"],
+    [new Error("errcode 45015 response timeout"), "reply-window-closed"],
+    [new Error("errcode 40164 invalid ip"), "ip-not-allowed"],
+    // Our own adapter's stable signal beats any vendor prose.
+    [Object.assign(new Error("whatever the platform said"), { failure: "ip-not-allowed" }), "ip-not-allowed"],
   ];
-  for (const [, err, expected] of cases) {
+  for (const [err, expected] of cases) {
     const t = await boot({
       send: async () => {
         throw err;

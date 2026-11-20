@@ -145,8 +145,16 @@ function guessMime(name = "") {
 
 export default {
   platform: "wecom-bot",
-  // Conservative: may be IP-gated until task 5.2 produces evidence otherwise.
-  outbound: { mode: "proactive-ip-gated", inbound: true },
+  // MEASURED (2026-11-20, task 5.2), not assumed. Over the long connection,
+  // `sendMessage(chatid)` delivered with no prior inbound on two different
+  // groups: errcode 0 in 360ms and 308ms. The old HTTP-callback leg could only
+  // reply inside a ~1h passive window and was gated by 企业可信IP; the long
+  // connection has neither constraint, because WE dial the platform — there is
+  // no caller address for the platform to allowlist.
+  //
+  // Consequence worth stating plainly: this is the FIRST WeCom leg that is
+  // genuinely url-keyed. An egress change cannot break it.
+  outbound: { mode: "url-keyed", inbound: true },
   inboundModes: ["long-connection"],
   credentialFields: [
     { key: "botId", label: "Bot ID" },

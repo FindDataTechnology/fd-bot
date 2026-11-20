@@ -181,6 +181,10 @@ test("stop is idempotent and clears cached media", async () => {
 test("declares a real outbound path and no callback mode", async () => {
   const { default: adapter } = await import("../src/adapters/wecom-bot.js");
   assert.equal(adapter.outbound.inbound, true);
-  assert.notEqual(adapter.outbound.mode, "none");
+  // Task 5.2 evidence: sendMessage(chatid) over the long connection returned
+  // errcode 0 in 360ms / 308ms on two groups with NO prior inbound. We dial the
+  // platform, so there is no caller address to allowlist — an egress change
+  // cannot break this leg. Asserting the MEASURED value, not "not none".
+  assert.equal(adapter.outbound.mode, "url-keyed");
   assert.deepEqual(adapter.inboundModes, ["long-connection"]);
 });

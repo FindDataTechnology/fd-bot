@@ -1,0 +1,90 @@
+# fd-bot on the cheap cluster.
+#
+# Mirrors the chatwoot precedent: its own namespace, its own ArgoCD Application,
+# its own PG. One replica with `Recreate`: the acceptance queue is a local-path
+# volume and a second pod would race the same directory.
+#
+# Bindings are durable (PG); connection state is not, and does not need to be —
+# a long-connection leg reconnects itself and the acceptance queue replays what
+# arrived while it was down. That is the trade this service was built around.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fd-bot
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fd-bot-data
+  namespace: fd-bot
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fd-bot
+  namespace: fd-bot
+  labels: { app: fd-bot }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: fd-bot }
+  template:
+    metadata:
+      labels: { app: fd-bot }
+    spec:
+      # The PVC is local-path, i.e. pinned to one node. Pin the pod beside it:
+      # a reschedule to another node leaves the acceptance queue behind.
+      nodeSelector:
+        kubernetes.io/hostname: liuliangdmh1xr0w9ryu
+      containers:
+        - name: fd-bot
+          image: ccr.ccs.tencentyun.com/finddata/fd-bot:0.1.0
+          ports: [{ containerPort: 8791 }]
+          env:
+            - { name: PORT, value: "8791" }
+            - { name: HOST, value: "0.0.0.0" }
+            - { name: FD_BOT_DATA_DIR, value: /data }
+            - name: FD_BOT_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: databaseUrl } }
+            - name: FD_BOT_MEDIA_SECRET
+              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: mediaSecret } }
+            - name: FD_BOT_CREDENTIAL_KEY
+              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: credentialKey } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            httpGet: { path: /health, port: 8791 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8791 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: fd-bot-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fd-bot
+  namespace: fd-bot
+spec:
+  type: NodePort
+  selector: { app: fd-bot }
+  ports:
+    - port: 8791
+      targetPort: 8791
+      # 31915 — provisional, recorded in fd-infra-deploy/PORTS.md. Re-verify the
+      # whole cluster is free before applying; the ledger says so too.
+      nodePort: 31915

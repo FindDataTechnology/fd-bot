@@ -119,6 +119,26 @@ npm test        # node --test test/
 
 按工作区纪律，**执行类验证在 CI 跑**（`.github/workflows/test.yml`），本机只做静态检查。
 
+## 部署（cheap 集群）
+
+```bash
+kubectl apply -f k8s/fd-bot.yaml      # namespace + PVC + Deployment + NodePort 31915
+```
+
+先建 Secret（**不入仓**）：
+
+```bash
+kubectl -n fd-bot create secret generic fd-bot-secrets \
+  --from-literal=databaseUrl='postgres://...' \
+  --from-literal=mediaSecret="$(openssl rand -base64 32)" \
+  --from-literal=credentialKey="$(openssl rand -base64 32)"
+```
+
+单副本 + `Recreate`：受理队列在 local-path PVC 上，两个 pod 会抢同一个目录。
+绑定在 PG（durable）；连接状态不持久——长连接自己重连，受理队列补发期间到达的消息。
+
+端口 31915 在 `fd-infra-deploy/PORTS.md` 是**预留**值，apply 前须重做全集群枚举 + 节点 nc 双验。
+
 ## 不做
 
 - 不做「平台无关的统一富消息模型」。统一到信封这一层就停。

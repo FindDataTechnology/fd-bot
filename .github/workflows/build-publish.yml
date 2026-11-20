@@ -1,8 +1,14 @@
-# Publishes the fd-bot image to our registry on a version tag.
+﻿# Publishes the fd-bot image to our registry on a version tag.
 #
-# Registry chain (see the fleet's tcr-image-pipeline): GHA builds and pushes to
-# the org registry; the cheap9 relay mirrors it onward. Credentials come from
-# repository secrets — never from this file, which is public.
+# Registry chain (fleet standard, see the tcr-image-pipeline notes):
+#   GH(US) → hkccr (Hong Kong) → tcr-relay every 5 min → ccr (Guangzhou)
+# Nodes pull from ccr.ccs.tencentyun.com with node-level registries.yaml auth.
+#
+# Secret NAMES are the trap here: the org-level secrets are `TCR_USER` /
+# `TCR_PASS` (visibility = public repositories, so a new public repo like this
+# one needs no per-repo setup). Workflows that write `TCR_USERNAME`/
+# `TCR_PASSWORD` silently get an empty string and fail at `docker login` with
+# "Username and password required" — which looks like "no secret configured".
 name: build-publish
 
 on:
@@ -13,6 +19,11 @@ on:
       tag:
         description: "tag to publish (default: the pushed tag)"
         required: false
+
+env:
+  REGISTRY: hkccr.ccs.tencentyun.com
+  # The prefix GitOps manifests reference (after the 5-minute relay lands it).
+  CCR_IMAGE: ccr.ccs.tencentyun.com/finddata/fd-bot
 
 jobs:
   publish:
@@ -26,27 +37,39 @@ jobs:
         id: tag
         run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
-      - name: fail early on missing registry secrets
-        run: |
-          test -n "${{ secrets.TCR_USER }}" || { echo "::error::TCR_USER missing"; exit 1; }
-          test -n "${{ secrets.TCR_PASS }}" || { echo "::error::TCR_PASS missing"; exit 1; }
+      - name: registry login (org secrets TCR_USER / TCR_PASS)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TCR_USER }}
+          password: ${{ secrets.TCR_PASS }}
 
-      - name: login
-        run: echo "${{ secrets.TCR_PASS }}" | docker login "${{ vars.TCR_HOST }}" -u "${{ secrets.TCR_USER }}" --password-stdin
+      - uses: docker/setup-buildx-action@v3
 
-      - name: build and push
-        run: |
-          img="${{ vars.TCR_HOST }}/finddata/fd-bot:${{ steps.tag.outputs.value }}"
-          docker build -t "$img" .
-          docker push "$img"
-          echo "pushed $img"
+      - name: build and push to hkccr
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/finddata/fd-bot:${{ steps.tag.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # A tag is bumpable only when the image is actually addressable. The
-      # lesson from the fleet: rolling a tag before the mirror has the layer
-      # gives ErrImagePull at maxSurge:0, which is a full outage with a green
-      # ArgoCD. Verify the digest from inside the registry before saying done.
-      - name: verify the digest resolves
+      - name: image summary
         run: |
-          img="${{ vars.TCR_HOST }}/finddata/fd-bot:${{ steps.tag.outputs.value }}"
+          echo "## image → hkccr" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ env.REGISTRY }}/finddata/fd-bot:${{ steps.tag.outputs.value }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "ccr 侧最多滞后 5 分钟（relay）。滚 tag 前先确认 ccr 已有该镜像——" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`maxSurge:0\` 下 \`ErrImagePull\` 就是零副本全断，而 ArgoCD 仍显示 Synced。" >> "$GITHUB_STEP_SUMMARY"
+
+      # The digest must resolve FROM the registry, not from the build output: a
+      # build that "succeeded" but whose push is not addressable is exactly the
+      # failure mode that rolls a tag into ErrImagePull.
+      - name: verify the pushed tag resolves
+        run: |
+          img="${{ env.REGISTRY }}/finddata/fd-bot:${{ steps.tag.outputs.value }}"
           docker buildx imagetools inspect "$img" | tee /tmp/inspect.txt
           grep -q Digest /tmp/inspect.txt

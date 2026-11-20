@@ -25,6 +25,10 @@ export function buildEnvelope({ bindingId, platform, message, tickets }) {
     platform,
     bindingId,
     chatKey: String(msg.chatKey ?? ""),
+    // "group" | "single" | null when the platform does not say. chatKey alone
+    // cannot answer "room or one person?" — the platform uses different APIs for
+    // the two, so a consumer that has to guess gets it wrong half the time.
+    chatType: msg.chatType ?? null,
     senderId: msg.senderId == null ? null : String(msg.senderId),
     senderName: msg.senderName == null ? null : String(msg.senderName),
     text: String(msg.text ?? ""),

@@ -87,10 +87,17 @@ export function createTransport(binding, { createClient = (opts) => new AiBot.WS
         const { text, media } = flatten(body);
         const id = body.msgid ?? null;
         if (media.length) rememberMedia(id, media);
-        // One message in → one envelope out. `raw` carries the platform body so a
-        // consumer that needs a field we did not normalize can still read it.
+        // One message in → one envelope out.
+        //
+        // `chatType` is carried explicitly (2026-11-20, found on a real inbound):
+        // a group message arrives with `chattype:"group"` + `chatid`, a direct
+        // message with `chattype:"single"` + no chatid, and BOTH reduce to a bare
+        // string in chatKey. Without this field a consumer cannot tell whether it
+        // is answering a room or one person — and "reply to the group" and "reply
+        // to a member" are different platform APIs.
         void onMessage({
           chatKey: chatKeyOf(body),
+          chatType: String(body.chattype ?? "").toLowerCase() || null,
           senderId: senderOf(body),
           senderName: senderOf(body),
           text,

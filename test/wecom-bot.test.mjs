@@ -188,3 +188,22 @@ test("declares a real outbound path and no callback mode", async () => {
   assert.equal(adapter.outbound.mode, "url-keyed");
   assert.deepEqual(adapter.inboundModes, ["long-connection"]);
 });
+
+test("chatType distinguishes a group from a direct message", async () => {
+  // Found on a real inbound (2026-11-20): a group frame is chattype:"group" +
+  // chatid, a direct one is chattype:"single" with no chatid, and both collapse
+  // to one string in chatKey. The platform answers them through different APIs,
+  // so a consumer that has to guess gets it wrong half the time.
+  const { client } = stubClient();
+  const got = [];
+  const t = createTransport(binding, { createClient: () => client });
+  await t.start((m) => got.push(m));
+  client.emit("message", {
+    body: { msgid: "g1", chattype: "group", chatid: "wrG", from: { userid: "u" }, msgtype: "text", text: { content: "hi" } },
+  });
+  client.emit("message", {
+    body: { msgid: "s1", chattype: "single", from: { userid: "u" }, msgtype: "text", text: { content: "hi" } },
+  });
+  assert.equal(got[0].chatType, "group");
+  assert.equal(got[1].chatType, "single");
+});

@@ -176,6 +176,38 @@ test("send failure carries a classification, never a fake success", async () => 
   }
 });
 
+test("all three failure classes are distinguishable at the endpoint", async () => {
+  const cases = [
+    [, new Error("no live response_url for this chat"), "reply-window-closed"],
+    ["reply-window-closed", "reply-window-closed"],
+    [null, new Error("socket hang up"), "other"],
+    [null, new Error("errcode 45015 response timeout"), "reply-window-closed"],
+    [null, new Error("errcode 40164 invalid ip"), "ip-not-allowed"],
+  ];
+  for (const [, err, expected] of cases) {
+    const t = await boot({
+      send: async () => {
+        throw err;
+      },
+    });
+    try {
+      const b = await makeBinding(t);
+      const body = await (
+        await fetch(`${t.base}/v1/send`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bindingId: b.id, chatKey: "c", text: "x" }),
+        })
+      ).json();
+      assert.equal(body.ok, false);
+      assert.equal(body.failure, expected, `${err.message} → ${expected}`);
+      assert.ok(body.detail, "the operator needs a sentence, not just a code");
+    } finally {
+      await t.close();
+    }
+  }
+});
+
 test("a leg that declares outbound none refuses without pretending to try", async () => {
   const dead = { ...stubPlatform(), platform: "dead", outbound: { mode: "none", inbound: false } };
   const live = stubPlatform();

@@ -17,7 +17,7 @@
 // declared and the inbound side says so honestly in comments rather than
 // pretending.
 import crypto from "node:crypto";
-import { fetchWithTimeout } from "../lib/http.js";
+import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 import { tokenCache } from "../lib/token-cache.js";
 
 const BASE = process.env.FEISHU_BASE_URL || "https://open.feishu.cn";
@@ -35,7 +35,7 @@ function tokenFor(cred, fetchImpl) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ app_id: cred.appId, app_secret: cred.appSecret }),
         },
-        { fetchImpl, timeoutMs: 10_000 },
+        { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
       );
       const j = await res.json().catch(() => ({}));
       if (j.code !== 0) throw new Error(`tenant_access_token: ${j.msg}`);
@@ -162,7 +162,7 @@ export function createTransport(binding, { fetchImpl = null, createWsClient = nu
             },
             body: JSON.stringify({ receive_id: chatKey, msg_type: "text", content: JSON.stringify({ text }) }),
           },
-          { fetchImpl, timeoutMs: 10_000 },
+          { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
         );
         return res.json().catch(() => ({}));
       };

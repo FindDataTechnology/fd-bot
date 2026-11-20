@@ -15,7 +15,7 @@
 // about one thing. Colon never appears in a channel id or a ts, so the first
 // colon is an unambiguous split.
 import crypto from "node:crypto";
-import { fetchWithTimeout } from "../lib/http.js";
+import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 
 const API = "https://slack.com/api";
 const MAX_SKEW_SEC = 5 * 60;
@@ -97,7 +97,7 @@ export function createTransport(binding, { fetchImpl = null } = {}) {
           headers: { "content-type": "application/json", authorization: `Bearer ${cred.botToken}` },
           body: JSON.stringify(payload),
         },
-        { fetchImpl, timeoutMs: 10_000 },
+        { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
       );
       const json = await res.json().catch(() => ({}));
       // Slack answers 200 with {ok:false, error} for EVERY failure mode,

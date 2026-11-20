@@ -14,7 +14,7 @@
 //
 // A pure push-only leg is the one honest case where `outbound.mode` may be
 // non-none while `inbound` is false; the capability gate allows exactly this.
-import { fetchWithTimeout } from "../lib/http.js";
+import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 
 // The only accepted shape is the official endpoint with a key parameter. Accepting
 // an arbitrary URL would let a binding row exfiltrate room content to any host —
@@ -51,7 +51,7 @@ export function createTransport(binding, { fetchImpl = null } = {}) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ msgtype: "markdown", markdown: { content: String(text ?? "") } }),
         },
-        { fetchImpl, timeoutMs: 10_000 },
+        { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
       );
       const j = await res.json().catch(() => ({}));
       // 45009 = the robot's per-group rate limit; surfaced verbatim so the room can

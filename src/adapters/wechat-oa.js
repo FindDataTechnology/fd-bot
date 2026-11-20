@@ -10,7 +10,7 @@
 // v1 ceiling (carried over): plaintext callback mode only. 安全模式 (AES) uses the
 // same envelope as WeCom — reuse wecom.js's decrypt/signature if it is needed.
 import crypto from "node:crypto";
-import { fetchWithTimeout } from "../lib/http.js";
+import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 import { tokenCache } from "../lib/token-cache.js";
 import { xmlField } from "../lib/xml.js";
 
@@ -34,7 +34,7 @@ function tokenFor(cred, fetchImpl) {
       // rotation replaces the binding, and a captured secret would keep fetching
       // with the OLD one forever (the wecom adapter hit exactly this).
       const url = `${BASE}/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(entry.cred.appId)}&secret=${encodeURIComponent(entry.cred.appSecret)}`;
-      const res = await fetchWithTimeout(url, {}, { fetchImpl, timeoutMs: 10_000 });
+      const res = await fetchWithTimeout(url, {}, { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS });
       const j = await res.json();
       if (j.errcode) throw new Error(`token: ${j.errcode} ${j.errmsg}`);
       return { token: j.access_token, expiresInSec: j.expires_in };
@@ -80,7 +80,7 @@ export function createTransport(binding, { fetchImpl = null } = {}) {
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ touser: chatKey, msgtype: "text", text: { content: text } }),
           },
-          { fetchImpl, timeoutMs: 10_000 },
+          { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
         );
         return res.json();
       };

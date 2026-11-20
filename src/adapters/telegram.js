@@ -15,7 +15,9 @@ const POLL_TIMEOUT_SEC = 25;
 // Long-poll headroom: getUpdates parks for POLL_TIMEOUT_SEC by design, so its
 // deadline must exceed the poll window, not the shared default.
 const POLL_TIMEOUT_MS = (POLL_TIMEOUT_SEC + 5) * 1000;
-const CALL_TIMEOUT_MS = 10_000;
+// Same lesson as lib/http: a platform call from a China egress legitimately
+// takes >10s. The long-poll window keeps its own (larger) deadline below.
+const CALL_TIMEOUT_MS = 30_000;
 
 const api = (token, method) => `${API}/bot${token}/${method}`;
 

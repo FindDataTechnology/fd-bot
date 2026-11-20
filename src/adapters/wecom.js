@@ -12,7 +12,7 @@
 //
 // This leg has NO long-connection alternative; it is a straight port.
 import crypto from "node:crypto";
-import { fetchWithTimeout } from "../lib/http.js";
+import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 import { tokenCache } from "../lib/token-cache.js";
 import { xmlField } from "../lib/xml.js";
 
@@ -78,7 +78,7 @@ function tokenFor(cred, fetchImpl) {
     entry = { cred, cache: null };
     entry.cache = tokenCache(async () => {
       const url = `${BASE}/cgi-bin/gettoken?corpid=${encodeURIComponent(entry.cred.corpId)}&corpsecret=${encodeURIComponent(entry.cred.corpSecret)}`;
-      const res = await fetchWithTimeout(url, {}, { fetchImpl, timeoutMs: 10_000 });
+      const res = await fetchWithTimeout(url, {}, { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS });
       const j = await res.json();
       if (j.errcode) throw new Error(`gettoken: ${j.errcode} ${j.errmsg}`);
       return { token: j.access_token, expiresInSec: j.expires_in };
@@ -139,7 +139,7 @@ export function createTransport(binding, { fetchImpl = null } = {}) {
         const res = await fetchWithTimeout(
           url,
           { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
-          { fetchImpl, timeoutMs: 10_000 },
+          { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },
         );
         return res.json();
       };

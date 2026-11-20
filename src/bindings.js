@@ -55,13 +55,15 @@ export function createMemoryStore() {
     // the one that must survive a disk being read, and it encrypts at rest
     // (credentials.js). Round-tripping the cipher here would only add a failure
     // mode that no deployment exercises — the crypto has its own test.
-    async create({ platform, credentials, subscriberUrl, inboundMode, label }) {
+    async create({ platform, credentials, subscriberUrl, inboundMode, label, deliveryToken: given }) {
       const row = shape({
         id: newId("b"),
         platform,
         credentials: { ...credentials },
         subscriberUrl,
-        deliveryToken: newToken(),
+        // The subscriber owns the token it will check, so it may supply one.
+        // Random when absent (server decides).
+        deliveryToken: given || newToken(),
         callbackSecret: newToken(),
         inboundMode,
         label,
@@ -112,9 +114,9 @@ export async function createPgStore({ connectionString, credentialKey, migrate =
     async migrate() {
       await runMigrations(pool);
     },
-    async create({ platform, credentials, subscriberUrl, inboundMode, label }) {
+    async create({ platform, credentials, subscriberUrl, inboundMode, label, deliveryToken: given }) {
       const id = newId("b");
-      const deliveryToken = newToken();
+      const deliveryToken = given || newToken();
       const callbackSecret = newToken();
       await pool.query(
         `INSERT INTO fd_bot_bindings (id, platform, credentials, subscriber_url, delivery_token, callback_secret, inbound_mode, label, created_at)

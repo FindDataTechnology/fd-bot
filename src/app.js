@@ -26,7 +26,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
   });
 
   app.post("/v1/bindings", json, async (req, res) => {
-    const { platform, credentials, subscriberUrl, inboundMode, label } = req.body ?? {};
+    const { platform, credentials, subscriberUrl, inboundMode, label, deliveryToken } = req.body ?? {};
     const adapter = registry.get(String(platform ?? ""));
     if (!adapter) return res.status(400).json({ error: `unknown platform "${platform}"` });
     if (!credentials || typeof credentials !== "object") {
@@ -54,7 +54,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
       subscriberUrl: String(subscriberUrl),
       inboundMode: mode,
       label: label ?? null,
-      credentialKey: cfg.credentialKey,
+      deliveryToken: typeof deliveryToken === "string" && deliveryToken.length >= 16 ? deliveryToken : null,
     });
     const health = await connections.startBinding(row);
     res.status(201).json({ ...toPublic(row, { adapter }), health });

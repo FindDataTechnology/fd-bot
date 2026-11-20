@@ -51,11 +51,15 @@ export function createMemoryStore() {
   return {
     kind: "memory",
     async migrate() {},
-    async create({ platform, credentials, subscriberUrl, inboundMode, label, credentialKey }) {
+    // Dev/test only: values stay in plaintext in this process. The PG store is
+    // the one that must survive a disk being read, and it encrypts at rest
+    // (credentials.js). Round-tripping the cipher here would only add a failure
+    // mode that no deployment exercises — the crypto has its own test.
+    async create({ platform, credentials, subscriberUrl, inboundMode, label }) {
       const row = shape({
         id: newId("b"),
         platform,
-        credentials: encryptCredentials(credentialKey, credentials),
+        credentials: { ...credentials },
         subscriberUrl,
         deliveryToken: newToken(),
         callbackSecret: newToken(),

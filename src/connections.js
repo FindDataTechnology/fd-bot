@@ -18,7 +18,7 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
     const adapter = registry.get(binding.platform);
     if (!adapter) throw new Error(`no adapter for platform "${binding.platform}"`);
     const transport = adapter.createTransport(binding);
-    const fresh = { transport, binding, state: { connected: false, inboundMode: binding.inboundMode, error: null } };
+    const fresh = { transport, binding, started: false, state: { connected: false, inboundMode: binding.inboundMode, error: null } };
     entries.set(binding.id, fresh);
     return fresh;
   }
@@ -56,19 +56,24 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
 
   async function startBinding(binding) {
     const entry = adopt(binding);
-    if (entry.state.connected || typeof entry.transport.start !== "function") {
-      entry.state.connected = Boolean(entry.transport.start);
-      return entry.state;
-    }
+    if (entry.started) return entry.state;
+    entry.started = true;
     try {
-      await entry.transport.start((message) => {
-        entry.state.connected = true;
+      await entry.transport.start?.((message) => {
+        entry.state = { ...entry.state, connected: true };
         return ingest(binding, message).catch((err) =>
           log.warn(`[ingest] binding ${binding.id}: ${err.message}`),
         );
       });
-      entry.state = { connected: true, inboundMode: binding.inboundMode, error: null };
+      // A transport with no start() is a callback-only leg: it is reachable
+      // through the callback route, which is a different kind of "connected".
+      entry.state = {
+        connected: true,
+        inboundMode: binding.inboundMode,
+        error: null,
+      };
     } catch (err) {
+      entry.started = false;
       entry.state = { connected: false, inboundMode: binding.inboundMode, error: err.message };
       log.warn(`[conn] binding ${binding.id} (${binding.platform}) failed to start: ${err.message}`);
     }

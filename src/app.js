@@ -85,7 +85,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
         detail: `platform "${row.platform}" declares outbound.mode "none"`,
       });
     }
-    const entry = connections.entries.get(row.id) ?? (await connections.startBinding(row));
+    await connections.startBinding(row);
     const transport = connections.entries.get(row.id)?.transport;
     if (!transport?.sendText) {
       return res.status(200).json({ ok: false, failure: "other", detail: "transport has no sendText" });

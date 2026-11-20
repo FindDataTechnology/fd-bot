@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@wecom/aibot-node-sdk": "^1.0.7",
-    "express": "^4.22.3"
+    "express": "^4.22.3",
+    "pg": "^8.23.1"
   }
 }

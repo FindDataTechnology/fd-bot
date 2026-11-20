@@ -71,6 +71,36 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     res.json({ ...toPublic(row, { adapter }), health: connections.stateOf(row.id) });
   });
 
+  // Retire a binding. Added after a real incident (2026-11-20): a long-connection
+  // platform allows ONE live connection per bot, so duplicate bindings actively
+  // fight each other — each new connection makes the platform drop the previous
+  // one (`disconnected_event`), and there was no way to remove the extras.
+  // A binding can never be hard-deleted here: the acceptance queue and the
+  // operator's audit both reference it by id.
+  app.delete("/v1/bindings/:id", async (req, res) => {
+    const row = await store.get(req.params.id);
+    if (!row || row.disabledAt) return res.status(404).json({ error: "not found" });
+    // Stop the connection BEFORE marking it disabled: a disabled row whose socket
+    // is still open would keep receiving messages nobody is allowed to ask about.
+    await connections.stopBinding(row.id);
+    const ok = await store.disable(row.id);
+    if (!ok) return res.status(409).json({ error: "could not disable binding" });
+    log.info(`[bindings] ${row.id} (${row.platform}) retired`);
+    res.json({ ok: true, id: row.id, platform: row.platform, disabledAt: Date.now() });
+  });
+
+  // List active bindings — needed to FIND duplicates, which the incident showed
+  // is not something an operator can do from outside.
+  app.get("/v1/bindings", async (req, res) => {
+    const rows = await store.list();
+    res.json(
+      rows.map((row) => ({
+        ...toPublic(row, { adapter: registry.get(row.platform) }),
+        health: connections.stateOf(row.id),
+      })),
+    );
+  });
+
   app.post("/v1/send", json, async (req, res) => {
     const { bindingId, chatKey, text } = req.body ?? {};
     if (!bindingId || !chatKey || typeof text !== "string") {

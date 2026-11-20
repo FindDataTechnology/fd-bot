@@ -259,3 +259,32 @@ test("a tampered media ticket is rejected", async () => {
   const other = createMediaTickets({ secret: "different-secret-xxxxxxxx", ttlMs: 60_000 });
   assert.equal(tickets.read(other.issueFor({ bindingId: "b1", platformMessageId: "m1", index: 0, kind: "image" }).split("/").pop()), null);
 });
+
+test("bindings can be listed and retired — duplicates are a real failure mode", async () => {
+  // A long-connection platform allows ONE live connection per bot, so duplicate
+  // bindings fight each other (the platform drops the previous connection). The
+  // deployed service had four rows for one bot and no way to see or remove them.
+  const t = await boot();
+  try {
+    const a = await makeBinding(t);
+    const b = await makeBinding(t);
+
+    const list = await (await fetch(`${t.base}/v1/bindings`)).json();
+    assert.equal(list.length, 2, "both bindings are listed");
+
+    const del = await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE" });
+    assert.equal(del.status, 200);
+    assert.equal((await del.json()).ok, true);
+
+    const after = await (await fetch(`${t.base}/v1/bindings`)).json();
+    assert.equal(after.length, 1, "the retired one is gone from the list");
+    assert.equal(after[0].id, b.id);
+
+    // Retiring twice is a 404, not a second side effect.
+    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE" })).status, 404);
+    // And a retired binding is not readable.
+    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`)).status, 404);
+  } finally {
+    await t.close();
+  }
+});

@@ -1,0 +1,37 @@
+# Builds the image on every push — no publish. The publish path lives in
+# build-publish.yml and only runs on a tag, so a PR cannot push an image.
+name: build-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t fd-bot:ci .
+      - name: the image refuses to boot without secrets (fail-closed proof)
+        run: |
+          set +e
+          out=$(docker run --rm fd-bot:ci 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test $code -ne 0 || { echo "::error::image started without secrets"; exit 1; }
+          echo "$out" | grep -q FD_BOT_MEDIA_SECRET
+      - name: /health answers with secrets present
+        run: |
+          cid=$(docker run -d -e FD_BOT_MEDIA_SECRET=ci-media-secret-0123456789 \
+                            -e FD_BOT_CREDENTIAL_KEY=ci-credential-key-0123456789 \
+                            -p 8791:8791 fd-bot:ci)
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8791/health >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json
+          docker rm -f "$cid"

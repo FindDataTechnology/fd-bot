@@ -7,6 +7,11 @@
 # Bindings are durable (PG); connection state is not, and does not need to be —
 # a long-connection leg reconnects itself and the acceptance queue replays what
 # arrived while it was down. That is the trade this service was built around.
+#
+# The database lives INSIDE the cluster: a host Postgres would mean every fd-bot
+# restart depends on a container outside this namespace, and the binding table is
+# small (one row per platform credential). A StatefulSet with a local-path PVC is
+# the same shape chatwoot uses, for the same reason.
 ---
 apiVersion: v1
 kind: Namespace
@@ -23,6 +28,79 @@ spec:
   resources:
     requests:
       storage: 2Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fd-bot-secrets
+  namespace: fd-bot
+type: Opaque
+stringData:
+  # REPLACE BEFORE APPLYING. Generate both with:
+  #   openssl rand -base64 32
+  # These placeholders exist so `kubectl apply` is one command, not so anyone
+  # ships them: the service refuses to boot with <16-char values, and these are
+  # '<CHANGE-ME>' — which is 10 chars, so it fails closed.
+  mediaSecret: "<CHANGE-ME>"
+  credentialKey: "<CHANGE-ME>"
+  # The postgres password this manifest's StatefulSet will use. Kept beside the
+  # other secrets so a rotation is one object edit.
+  postgresPassword: "<CHANGE-ME>"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fd-bot-pg
+  namespace: fd-bot
+  labels: { app: fd-bot-pg }
+spec:
+  serviceName: fd-bot-pg
+  replicas: 1
+  selector:
+    matchLabels: { app: fd-bot-pg }
+  template:
+    metadata:
+      labels: { app: fd-bot-pg }
+    spec:
+      # local-path PVC → pinned. Same node as the app so a single node failure
+      # is the whole service down rather than two different partial failures.
+      nodeSelector:
+        kubernetes.io/hostname: cheap-4
+      containers:
+        - name: postgres
+          image: ccr.ccs.tencentyun.com/finddata/fd-bot-pg:16
+          env:
+            - { name: POSTGRES_DB, value: fd_bot }
+            - { name: POSTGRES_USER, value: fd_bot }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: postgresPassword } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "fd_bot", "-d", "fd_bot"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata: { name: pgdata }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fd-bot-pg
+  namespace: fd-bot
+spec:
+  selector: { app: fd-bot-pg }
+  ports: [{ port: 5432, targetPort: 5432 }]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,8 +119,15 @@ spec:
     spec:
       # The PVC is local-path, i.e. pinned to one node. Pin the pod beside it:
       # a reschedule to another node leaves the acceptance queue behind.
+      #
+      # Node chosen 2026-11-20 by measured disk headroom (the ledger's own
+      # lesson from chatwoot's three migrations: "搬家只是换个人疼"):
+      #   cheap-4 54% · liuliangdmh1xr0w9ryu 63% · liuliangjkiimypbdzxa 70%
+      #   · cheap-8 71% · cheap-7 75% · cheap-5 86%
+      # cheap-4 is also the emptiest on memory requests (5384Mi / 69% of
+      # allocatable); this pod asks for 96Mi.
       nodeSelector:
-        kubernetes.io/hostname: liuliangdmh1xr0w9ryu
+        kubernetes.io/hostname: cheap-4
       containers:
         - name: fd-bot
           image: ccr.ccs.tencentyun.com/finddata/fd-bot:0.1.0
@@ -52,7 +137,9 @@ spec:
             - { name: HOST, value: "0.0.0.0" }
             - { name: FD_BOT_DATA_DIR, value: /data }
             - name: FD_BOT_DATABASE_URL
-              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: databaseUrl } }
+              value: postgres://fd_bot:$(POSTGRES_PASSWORD)@fd-bot-pg:5432/fd_bot
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: postgresPassword } }
             - name: FD_BOT_MEDIA_SECRET
               valueFrom: { secretKeyRef: { name: fd-bot-secrets, key: mediaSecret } }
             - name: FD_BOT_CREDENTIAL_KEY

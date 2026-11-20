@@ -1,0 +1,52 @@
+# Publishes the fd-bot image to our registry on a version tag.
+#
+# Registry chain (see the fleet's tcr-image-pipeline): GHA builds and pushes to
+# the org registry; the cheap9 relay mirrors it onward. Credentials come from
+# repository secrets — never from this file, which is public.
+name: build-publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "tag to publish (default: the pushed tag)"
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve tag
+        id: tag
+        run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: fail early on missing registry secrets
+        run: |
+          test -n "${{ secrets.TCR_USER }}" || { echo "::error::TCR_USER missing"; exit 1; }
+          test -n "${{ secrets.TCR_PASS }}" || { echo "::error::TCR_PASS missing"; exit 1; }
+
+      - name: login
+        run: echo "${{ secrets.TCR_PASS }}" | docker login "${{ vars.TCR_HOST }}" -u "${{ secrets.TCR_USER }}" --password-stdin
+
+      - name: build and push
+        run: |
+          img="${{ vars.TCR_HOST }}/finddata/fd-bot:${{ steps.tag.outputs.value }}"
+          docker build -t "$img" .
+          docker push "$img"
+          echo "pushed $img"
+
+      # A tag is bumpable only when the image is actually addressable. The
+      # lesson from the fleet: rolling a tag before the mirror has the layer
+      # gives ErrImagePull at maxSurge:0, which is a full outage with a green
+      # ArgoCD. Verify the digest from inside the registry before saying done.
+      - name: verify the digest resolves
+        run: |
+          img="${{ vars.TCR_HOST }}/finddata/fd-bot:${{ steps.tag.outputs.value }}"
+          docker buildx imagetools inspect "$img" | tee /tmp/inspect.txt
+          grep -q Digest /tmp/inspect.txt

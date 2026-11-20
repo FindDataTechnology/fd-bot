@@ -48,7 +48,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     // explicitly beats recording a mode the adapter cannot honour.
     const pushOnly = adapter.outbound.inbound === false || modes.length === 0;
     const mode = pushOnly ? "none" : (inboundMode ?? modes[0]);
-    if (!modes.includes(mode)) {
+    if (!pushOnly && !modes.includes(mode)) {
       return res.status(400).json({ error: `inboundMode must be one of ${modes.join(", ")}` });
     }
 

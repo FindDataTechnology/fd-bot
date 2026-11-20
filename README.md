@@ -1,6 +1,8 @@
 # fd-bot
 
 > **Part of the [Base line (寻数·壹座)](https://www.finddatatech.cloud/products/base) of [FindData](https://www.finddatatech.cloud)** — IM transport service: platform protocols and connections, nothing else.
+>
+> [Product page](https://www.finddatatech.cloud/products/fd-bot) · [中文产品页](https://www.finddatatech.cloud/zh/products/fd-bot) · [Operations manual](docs/OPERATIONS.md)
 
 外部 IM 的传输层。承接 `openspec/changes/adopt-fd-bot-transport`。
 

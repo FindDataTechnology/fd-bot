@@ -7,5 +7,8 @@ import wecomBot from "./wecom-bot.js";
 import telegram from "./telegram.js";
 import slack from "./slack.js";
 import feishu from "./feishu.js";
+import wecom from "./wecom.js";
+import wechatOa from "./wechat-oa.js";
+import wecomWebhook from "./wecom-webhook.js";
 
-export const adapters = [wecomBot, telegram, slack, feishu];
+export const adapters = [wecomBot, telegram, slack, feishu, wecom, wechatOa, wecomWebhook];

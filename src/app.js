@@ -125,9 +125,18 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     }
   });
 
-  // Platform callback face: `POST /v1/callbacks/:platform/:secret`.
-  // Raw body preserved (signature schemes need the exact bytes).
-  app.post("/v1/callbacks/:platform/:secret", express.raw({ type: "*/*", limit: "2mb" }), async (req, res) => {
+  // Platform callback faces.
+  //
+  // TWO shapes, because the platforms do not agree on the method:
+  //   POST  every current platform
+  //   GET   the WeCom self-built app and the WeChat official account BOTH do
+  //         their one-time URL echo-verify as a GET carrying echostr. A POST-only
+  //         route cannot complete that handshake at all, and the failure is
+  //         invisible until someone configures the callback URL in the console.
+  //
+  // Raw body preserved (signature schemes need the exact bytes). The same handler
+  // runs for both verbs; only `method` is passed through to the parser.
+  const callbackHandler = async (req, res) => {
     const adapter = registry.get(req.params.platform);
     if (!adapter) return res.status(404).json({ error: "unknown platform" });
     const binding = (await store.list()).find(
@@ -142,6 +151,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
         raw: req.body,
         headers: req.headers,
         query: req.query,
+        method: req.method,
         credentials: binding.credentials,
       });
     } catch (err) {
@@ -161,7 +171,10 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
       return res.status(503).json({ error: "temporarily unavailable" });
     }
     res.status(200).send("ok");
-  });
+  };
+
+  app.post("/v1/callbacks/:platform/:secret", express.raw({ type: "*/*", limit: "2mb" }), callbackHandler);
+  app.get("/v1/callbacks/:platform/:secret", callbackHandler);
 
   return app;
 }

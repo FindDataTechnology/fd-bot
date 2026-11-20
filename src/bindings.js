@@ -21,13 +21,29 @@ export function toPublic(row, { adapter = null } = {}) {
     credentials: { configured: Object.keys(row.credentials).filter((k) => String(row.credentials[k] ?? "").trim()) },
     outbound: adapter ? { mode: adapter.outbound.mode, inbound: adapter.outbound.inbound } : null,
     inboundModes: adapter?.inboundModes ?? [],
+    // The URL the operator pastes into the platform console. Its secret is
+    // PUBLIC BY NECESSITY (it travels in a URL the platform is configured with),
+    // and it is a DIFFERENT secret from deliveryToken — knowing the callback
+    // path must not let a caller forge envelopes to the subscriber.
+    callbackUrl: row.callbackSecret ? `/v1/callbacks/${row.platform}/${row.callbackSecret}` : null,
     createdAt: row.createdAt,
     disabledAt: row.disabledAt ?? null,
   };
 }
 
-function shape({ id, platform, credentials, subscriberUrl, deliveryToken, inboundMode, label, createdAt, disabledAt }) {
-  return { id, platform, credentials, subscriberUrl, deliveryToken, inboundMode, label: label ?? null, createdAt, disabledAt: disabledAt ?? null };
+function shape({ id, platform, credentials, subscriberUrl, deliveryToken, callbackSecret, inboundMode, label, createdAt, disabledAt }) {
+  return {
+    id,
+    platform,
+    credentials,
+    subscriberUrl,
+    deliveryToken,
+    callbackSecret: callbackSecret ?? null,
+    inboundMode,
+    label: label ?? null,
+    createdAt,
+    disabledAt: disabledAt ?? null,
+  };
 }
 
 export function createMemoryStore() {
@@ -42,6 +58,7 @@ export function createMemoryStore() {
         credentials: encryptCredentials(credentialKey, credentials),
         subscriberUrl,
         deliveryToken: newToken(),
+        callbackSecret: newToken(),
         inboundMode,
         label,
         createdAt: Date.now(),
@@ -79,6 +96,7 @@ export async function createPgStore({ connectionString, credentialKey, migrate =
       credentials: decryptCredentials(credentialKey, r.credentials),
       subscriberUrl: r.subscriber_url,
       deliveryToken: r.delivery_token,
+      callbackSecret: r.callback_secret,
       inboundMode: r.inbound_mode,
       label: r.label,
       createdAt: Number(r.created_at),
@@ -93,12 +111,13 @@ export async function createPgStore({ connectionString, credentialKey, migrate =
     async create({ platform, credentials, subscriberUrl, inboundMode, label }) {
       const id = newId("b");
       const deliveryToken = newToken();
+      const callbackSecret = newToken();
       await pool.query(
-        `INSERT INTO fd_bot_bindings (id, platform, credentials, subscriber_url, delivery_token, inbound_mode, label, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [id, platform, encryptCredentials(credentialKey, credentials), subscriberUrl, deliveryToken, inboundMode, label ?? null, Date.now()],
+        `INSERT INTO fd_bot_bindings (id, platform, credentials, subscriber_url, delivery_token, callback_secret, inbound_mode, label, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [id, platform, encryptCredentials(credentialKey, credentials), subscriberUrl, deliveryToken, callbackSecret, inboundMode, label ?? null, Date.now()],
       );
-      return shape({ id, platform, credentials, subscriberUrl, deliveryToken, inboundMode, label, createdAt: Date.now() });
+      return shape({ id, platform, credentials, subscriberUrl, deliveryToken, callbackSecret, inboundMode, label, createdAt: Date.now() });
     },
     async get(id) {
       const { rows } = await pool.query("SELECT * FROM fd_bot_bindings WHERE id = $1", [id]);

@@ -131,7 +131,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     const adapter = registry.get(req.params.platform);
     if (!adapter) return res.status(404).json({ error: "unknown platform" });
     const binding = (await store.list()).find(
-      (b) => b.platform === adapter.platform && tokenMatches(req.params.secret, b.credentials.callbackSecret ?? b.deliveryToken),
+      (b) => b.platform === adapter.platform && tokenMatches(req.params.secret, b.callbackSecret),
     );
     if (!binding) return res.status(403).json({ error: "no binding matches this callback" });
     if (!adapter.parseCallback) return res.status(501).json({ error: "platform has no callback parser" });

@@ -1,0 +1,23 @@
+{
+  "name": "fd-bot",
+  "version": "0.1.0",
+  "description": "IM transport service: platform protocols and connections only, no business semantics",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FindDataTechnology/fd-bot.git"
+  },
+  "dependencies": {
+    "@wecom/aibot-node-sdk": "^1.0.7",
+    "express": "^4.22.3"
+  }
+}

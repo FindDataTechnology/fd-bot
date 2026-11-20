@@ -43,7 +43,11 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
       .map((f) => f.key);
     if (missing.length) return res.status(400).json({ error: `missing credentials: ${missing.join(", ")}` });
     const modes = adapter.inboundModes ?? ["callback"];
-    const mode = inboundMode ?? modes[0];
+    // A push-only leg (inbound:false) still needs a binding — that is how you
+    // SEND through it. It simply has no inbound mode, and saying "none"
+    // explicitly beats recording a mode the adapter cannot honour.
+    const pushOnly = adapter.outbound.inbound === false || modes.length === 0;
+    const mode = pushOnly ? "none" : (inboundMode ?? modes[0]);
     if (!modes.includes(mode)) {
       return res.status(400).json({ error: `inboundMode must be one of ${modes.join(", ")}` });
     }

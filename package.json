@@ -17,6 +17,7 @@
     "url": "git+https://github.com/FindDataTechnology/fd-bot.git"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.76.0",
     "@wecom/aibot-node-sdk": "^1.0.7",
     "express": "^4.22.3",
     "pg": "^8.23.1"

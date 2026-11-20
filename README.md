@@ -121,8 +121,11 @@ npm test        # node --test test/
 
 ## 部署（cheap 集群）
 
-```bash
-kubectl apply -f k8s/fd-bot.yaml      # namespace + PVC + Deployment + NodePort 31915
+清单**不在本仓**（2026-11-20 起：部署清单集中在部署仓，源仓不留副本）：
+
+```
+fd-infra-deploy/all-services/fd-bot/fd-bot.yaml    namespace + PG + Deployment + NodePort 31915
+fd-infra-deploy/argocd/app-fd-bot.yaml             ArgoCD Application
 ```
 
 先建 Secret（**不入仓**）：
@@ -136,6 +139,7 @@ kubectl -n fd-bot create secret generic fd-bot-secrets \
 
 单副本 + `Recreate`：受理队列在 local-path PVC 上，两个 pod 会抢同一个目录。
 绑定在 PG（durable）；连接状态不持久——长连接自己重连，受理队列补发期间到达的消息。
+Pod 与 PG 都钉在 cheap-4（当日磁盘余量最大的一台）。
 
 端口 31915 在 `fd-infra-deploy/PORTS.md` 是**预留**值，apply 前须重做全集群枚举 + 节点 nc 双验。
 

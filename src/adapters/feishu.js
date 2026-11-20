@@ -77,6 +77,32 @@ function payloadOf(raw, credentials) {
   return JSON.parse(decrypt(credentials.encryptKey, body.encrypt));
 }
 
+/**
+ * One event payload → our message shape. Shared by the callback parser and the
+ * long-connection handler so the two legs cannot drift: the platform sends the
+ * SAME payload on both, one encrypted, one not.
+ */
+export function messageFromEvent(payload) {
+  if (payload?.header?.event_type !== "im.message.receive_v1") return null;
+  const msg = payload.event?.message;
+  if (msg?.message_type !== "text") return null;
+  let text = "";
+  try {
+    text = JSON.parse(msg.content).text || "";
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+  return {
+    chatKey: msg.chat_id,
+    senderId: payload.event?.sender?.sender_id?.open_id ?? null,
+    senderName: payload.event?.sender?.sender_id?.open_id || "unknown",
+    text,
+    media: [],
+    platformMessageId: msg.message_id || null,
+  };
+}
+
 /** Callback body → handshake echo | message | null. Throws to refuse. */
 export function parseCallback({ raw, headers, credentials }) {
   if (credentials.encryptKey) checkSignature(headers, raw, credentials.encryptKey);
@@ -87,35 +113,43 @@ export function parseCallback({ raw, headers, credentials }) {
   }
   // URL-verification handshake: echo the challenge verbatim.
   if (payload.type === "url_verification") return { handshake: JSON.stringify({ challenge: payload.challenge }) };
-
-  if (payload.header?.event_type !== "im.message.receive_v1") return { message: null };
-  const msg = payload.event?.message;
-  if (msg?.message_type !== "text") return { message: null };
-  let text = "";
-  try {
-    text = JSON.parse(msg.content).text || "";
-  } catch {
-    return { message: null };
-  }
-  if (!text) return { message: null };
-  return {
-    message: {
-      chatKey: msg.chat_id,
-      senderId: payload.event?.sender?.sender_id?.open_id ?? null,
-      senderName: payload.event?.sender?.sender_id?.open_id || "unknown",
-      text,
-      media: [],
-      platformMessageId: msg.message_id || null,
-    },
-  };
+  return { message: messageFromEvent(payload) };
 }
 
-export function createTransport(binding, { fetchImpl = null } = {}) {
+export function createTransport(binding, { fetchImpl = null, createWsClient = null } = {}) {
   const cred = binding.credentials;
+  let ws = null;
   return {
-    inboundMode: "callback",
-    async start() {},
-    async stop() {},
+    inboundMode: binding.inboundMode === "long-connection" ? "long-connection" : "callback",
+
+    async start(onMessage) {
+      if (binding.inboundMode !== "long-connection") return;
+      // Long connection: we dial the platform, so the binding needs no public
+      // address. Two platform facts that shape the handler:
+      //   • auth happens once at connect; pushed events are PLAINTEXT — the
+      //     signature/decrypt path above does not run on this leg;
+      //   • the platform re-pushes if we do not settle within 3s, so the handler
+      //     must only hand the message over (fd-bot persists before acking).
+      const sdk = await import("@larksuiteoapi/node-sdk");
+      const Lark = sdk.default ?? sdk;
+      const make =
+        createWsClient ??
+        ((cfg) => new Lark.WSClient({ ...cfg, loggerLevel: Lark.LoggerLevel?.warn ?? 2 }));
+      ws = make({ appId: cred.appId, appSecret: cred.appSecret });
+      const dispatcher = new Lark.EventDispatcher({}).register({
+        "im.message.receive_v1": async (data) => {
+          const msg = messageFromEvent(data);
+          if (msg) await onMessage(msg);
+        },
+      });
+      ws.start({ eventDispatcher: dispatcher });
+    },
+
+    async stop() {
+      // The SDK exposes no stop(); dropping the reference is all a caller can do.
+      ws = null;
+    },
+
     async sendText(chatKey, text) {
       const send = async () => {
         const res = await fetchWithTimeout(
@@ -148,7 +182,7 @@ export default {
   // tenant_access_token in the body, no caller-IP allowlist — same shape as
   // telegram: this leg survives an egress change.
   outbound: { mode: "url-keyed", inbound: true },
-  inboundModes: ["callback"],
+  inboundModes: ["long-connection", "callback"],
   credentialFields: [
     { key: "appId", label: "App ID" },
     { key: "appSecret", label: "App Secret", secret: true },

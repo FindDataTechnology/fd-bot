@@ -11,5 +11,6 @@ import wecom from "./wecom.js";
 import wechatOa from "./wechat-oa.js";
 import wecomWebhook from "./wecom-webhook.js";
 import chatwoot from "./chatwoot.js";
+import mattermost from "./mattermost.js";
 
-export const adapters = [wecomBot, telegram, slack, feishu, wecom, wechatOa, wecomWebhook, chatwoot];
+export const adapters = [wecomBot, telegram, slack, feishu, wecom, wechatOa, wecomWebhook, chatwoot, mattermost];

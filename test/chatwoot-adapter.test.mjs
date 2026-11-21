@@ -3,8 +3,9 @@
 // What this CAN prove: our wiring — HMAC scheme matches, the ignore rules drop
 // the right payloads, chatKey splits back into the reply URL, and a non-2xx
 // throws rather than masquerading as success.
-// What it CANNOT prove: that a real Chatwoot desk accepts the Agent Bot token
-// (`Authorization: Bot …` is an assumption, see the adapter header).
+// What it CANNOT prove: that a real Chatwoot desk accepts the token (that is now
+// verified separately against a live 4.19.0: `Authorization: Bearer <token>`,
+// not `Bot <token>` — see the adapter header). This file locks the request shape.
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -130,7 +131,7 @@ test("chatwoot: sendText POSTs an outgoing message to the account-scoped URL", a
   await t.sendText("3:12", "hi there");
   assert.equal(calls[0].url, "https://desk.example.com/api/v1/accounts/3/conversations/12/messages");
   assert.equal(calls[0].init.method, "POST");
-  assert.equal(calls[0].init.headers.authorization, "Bot bot-token");
+  assert.equal(calls[0].init.headers.authorization, "Bearer bot-token");
   assert.deepEqual(calls[0].body, { content: "hi there", message_type: "outgoing" });
 });
 

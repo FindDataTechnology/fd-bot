@@ -14,10 +14,14 @@
 // because the reply URL needs it (`/api/v1/accounts/{accountId}/...`), so a
 // consumer that round-trips chatKey into sendText needs no other lookup.
 //
-// Outbound auth assumption (UNVERIFIED against a live desk as of writing): an
-// Agent Bot token authenticates with the `Authorization: Bot <token>` header.
-// A user/agent token uses `api_access_token` instead; if this leg ever 401s
-// with a token known good, check which kind of token was pasted.
+// Outbound auth (VERIFIED against a live Chatwoot 4.19.0 on 2026-11-21): an
+// Agent Bot token authenticates with `Authorization: Bearer <token>`. It is NOT
+// `Bot <token>` — that scheme returned 401 on the real instance. Chatwoot's
+// AccessTokenAuthHelper accepts only `Bearer` (or the legacy `api_access_token`
+// header); a Bot owner is additionally restricted to BOT_ACCESSIBLE_ENDPOINTS,
+// which include `conversations/messages#create` and `conversations#toggle_status`.
+// If this leg ever 401s with a token known good, the token kind (user vs agent
+// bot) or the scheme is the first thing to check.
 import crypto from "node:crypto";
 import { fetchWithTimeout, PLATFORM_TIMEOUT_MS } from "../lib/http.js";
 
@@ -101,7 +105,7 @@ export function createTransport(binding, { fetchImpl = null } = {}) {
         `${base}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
         {
           method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bot ${cred.apiToken}` },
+          headers: { "content-type": "application/json", authorization: `Bearer ${cred.apiToken}` },
           body: JSON.stringify({ content: String(text ?? ""), message_type: "outgoing" }),
         },
         { fetchImpl, timeoutMs: PLATFORM_TIMEOUT_MS },

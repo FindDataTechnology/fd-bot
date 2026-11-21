@@ -16,6 +16,10 @@ export function loadConfig(env = process.env) {
     databaseUrl: env.FD_BOT_DATABASE_URL || null,
     publicBaseUrl: (env.FD_BOT_PUBLIC_BASE_URL || "").replace(/\/+$/, "") || null,
     mediaSecret: env.FD_BOT_MEDIA_SECRET || "",
+    // 调用面凭据（authenticate-send-endpoint）。**刻意不进 configProblems**：
+    // 缺它不该阻止启动——/health 必须能答，否则运维看到的是「整个服务挂了」
+    // 而不是「差一个 token」。受保护端点在缺失时回 503（见 app.js 的 apiAuth）。
+    apiToken: env.FD_BOT_API_TOKEN || "",
     credentialKey: env.FD_BOT_CREDENTIAL_KEY || "",
     delivery: {
       timeoutMs: int(env.FD_BOT_DELIVERY_TIMEOUT_MS, 10_000),

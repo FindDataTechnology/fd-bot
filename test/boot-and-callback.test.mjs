@@ -17,6 +17,7 @@ import { createConnectionManager } from "../src/connections.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SECRET = "test-media-secret-0123456789";
+const API_TOKEN = "test-api-token-0123456789";
 
 function runService(env) {
   return spawnSync(process.execPath, ["src/index.js"], {
@@ -62,6 +63,7 @@ async function bootCallback({ maxRecords = 5000 } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "fd-bot-cb-"));
   const cfg = {
     dataDir,
+    apiToken: API_TOKEN,
     credentialKey: "test-credential-key-0123456789",
     mediaSecret: SECRET,
     mediaTtlMs: 60_000,
@@ -106,7 +108,7 @@ async function bootCallback({ maxRecords = 5000 } = {}) {
   const created = await (
     await fetch(`${base}/v1/bindings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${API_TOKEN}` },
       body: JSON.stringify({ platform: "stub", credentials: { token: "t" }, subscriberUrl: "http://sub.test/hook" }),
     })
   ).json();

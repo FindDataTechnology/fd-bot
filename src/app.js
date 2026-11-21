@@ -16,6 +16,34 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
   // body for signature checks, so it is mounted with its own parser below.
   const json = express.json({ limit: "2mb" });
 
+  // ── 调用面准入（authenticate-send-endpoint）────────────────────────────────
+  //
+  // 「能改投递目的地」（/v1/bindings*）与「能发消息」（/v1/send）必须有凭据。
+  // 任何能在集群里起 pod 的东西都能打到 8791，这两个端点裸奔等于「任何 pod
+  // 都能以我们的平台身份往任意群发消息」。
+  //
+  // 两个刻意选择：
+  //   · 未配置 token → 503 而不是放行。默认放行的鉴权等于没有鉴权。
+  //     也不是拒绝启动——/health 必须能答，否则运维看到的是「整个服务挂了」
+  //     而不是「差一个 token」（design D2）。
+  //   · 挂在 json 解析器**之前**：body 里是告警正文与 binding 凭据，
+  //     先解析再验等于让未鉴权的请求把内容送进内存与日志路径（design D3）。
+  const PROTECTED = ["/v1/bindings", "/v1/send"];
+  const apiAuth = (req, res, next) => {
+    const expected = String(cfg.apiToken || "");
+    if (!expected) {
+      return res.status(503).json({
+        error: "this endpoint requires FD_BOT_API_TOKEN, which this deployment has not set",
+      });
+    }
+    const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || "").trim());
+    // 缺失与错误同形（同为 401）：不泄露「token 存在但错」。
+    if (!m || !tokenMatches(m[1].trim(), expected)) {
+      return res.status(401).set("WWW-Authenticate", "Bearer").json({ error: "unauthorized" });
+    }
+    next();
+  };
+
   app.get("/health", (req, res) => {
     res.json({ ok: true, bindings: connections.entries.size });
   });
@@ -25,7 +53,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     res.json(registry.capabilities());
   });
 
-  app.post("/v1/bindings", json, async (req, res) => {
+  app.post("/v1/bindings", apiAuth, json, async (req, res) => {
     const { platform, credentials, subscriberUrl, inboundMode, label, deliveryToken } = req.body ?? {};
     const adapter = registry.get(String(platform ?? ""));
     if (!adapter) return res.status(400).json({ error: `unknown platform "${platform}"` });
@@ -64,7 +92,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     res.status(201).json({ ...toPublic(row, { adapter }), health });
   });
 
-  app.get("/v1/bindings/:id", async (req, res) => {
+  app.get("/v1/bindings/:id", apiAuth, async (req, res) => {
     const row = await store.get(req.params.id);
     if (!row || row.disabledAt) return res.status(404).json({ error: "not found" });
     const adapter = registry.get(row.platform);
@@ -77,7 +105,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
   // one (`disconnected_event`), and there was no way to remove the extras.
   // A binding can never be hard-deleted here: the acceptance queue and the
   // operator's audit both reference it by id.
-  app.delete("/v1/bindings/:id", async (req, res) => {
+  app.delete("/v1/bindings/:id", apiAuth, async (req, res) => {
     const row = await store.get(req.params.id);
     if (!row || row.disabledAt) return res.status(404).json({ error: "not found" });
     // Stop the connection BEFORE marking it disabled: a disabled row whose socket
@@ -91,7 +119,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
 
   // List active bindings — needed to FIND duplicates, which the incident showed
   // is not something an operator can do from outside.
-  app.get("/v1/bindings", async (req, res) => {
+  app.get("/v1/bindings", apiAuth, async (req, res) => {
     const rows = await store.list();
     res.json(
       rows.map((row) => ({
@@ -101,7 +129,7 @@ export function createApp({ cfg, store, registry, connections, tickets, log = co
     );
   });
 
-  app.post("/v1/send", json, async (req, res) => {
+  app.post("/v1/send", apiAuth, json, async (req, res) => {
     const { bindingId, chatKey, text } = req.body ?? {};
     if (!bindingId || !chatKey || typeof text !== "string") {
       return res.status(400).json({ error: "bindingId, chatKey and text are required" });

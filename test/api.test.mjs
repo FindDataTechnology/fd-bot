@@ -16,6 +16,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const SECRET = "test-media-secret-0123456789";
+// 与 boot() 里的 cfg.apiToken 一致；受保护端点的调用都要带它。
+const API_TOKEN = "test-api-token-0123456789";
+const auth = { authorization: `Bearer ${API_TOKEN}` };
 
 function stubPlatform({ send = async () => {}, downloadMedia = null } = {}) {
   return {
@@ -41,6 +44,8 @@ async function boot({ send, downloadMedia, registryAdapters } = {}) {
   const dataDir = mkdtempSync(path.join(tmpdir(), "fd-bot-app-"));
   const cfg = {
     dataDir,
+    // authenticate-send-endpoint：受保护端点要 Bearer。测试统一用它。
+    apiToken: API_TOKEN,
     credentialKey: "test-credential-key-0123456789",
     mediaSecret: SECRET,
     mediaTtlMs: 5 * 60_000,
@@ -69,6 +74,7 @@ async function boot({ send, downloadMedia, registryAdapters } = {}) {
   return {
     base,
     cfg,
+    auth,
     store,
     adapter,
     async close() {
@@ -95,7 +101,7 @@ test("creating a binding never echoes a credential value", async () => {
   try {
     const res = await fetch(`${t.base}/v1/bindings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ platform: "stub", credentials: { token: "super-secret-value" }, subscriberUrl: "http://example.test/hook" }),
     });
     assert.equal(res.status, 201);
@@ -106,7 +112,7 @@ test("creating a binding never echoes a credential value", async () => {
     assert.ok(body.id);
 
     // Same on read.
-    const read = await (await fetch(`${t.base}/v1/bindings/${body.id}`)).text();
+    const read = await (await fetch(`${t.base}/v1/bindings/${body.id}`, { headers: t.auth })).text();
     assert.ok(!read.includes("super-secret-value"));
   } finally {
     await t.close();
@@ -116,11 +122,11 @@ test("creating a binding never echoes a credential value", async () => {
 test("unknown binding and unknown platform are distinct, honest errors", async () => {
   const t = await boot();
   try {
-    const missing = await fetch(`${t.base}/v1/bindings/b_nope`);
+    const missing = await fetch(`${t.base}/v1/bindings/b_nope`, { headers: t.auth });
     assert.equal(missing.status, 404);
     const badPlatform = await fetch(`${t.base}/v1/bindings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ platform: "nope", credentials: {}, subscriberUrl: "http://x.test/h" }),
     });
     assert.equal(badPlatform.status, 400);
@@ -134,7 +140,7 @@ test("missing required credential is refused at save time", async () => {
   try {
     const res = await fetch(`${t.base}/v1/bindings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ platform: "stub", credentials: {}, subscriberUrl: "http://x.test/h" }),
     });
     assert.equal(res.status, 400);
@@ -147,7 +153,7 @@ test("missing required credential is refused at save time", async () => {
 async function makeBinding(t, credentials = { token: "t" }) {
   const res = await fetch(`${t.base}/v1/bindings`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...t.auth },
     body: JSON.stringify({ platform: "stub", credentials, subscriberUrl: "http://example.test/hook" }),
   });
   return res.json();
@@ -164,7 +170,7 @@ test("send failure carries a classification, never a fake success", async () => 
     const b = await makeBinding(t);
     const res = await fetch(`${t.base}/v1/send`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ bindingId: b.id, chatKey: "c1", text: "hi" }),
     });
     assert.equal(res.status, 200, "a platform verdict is not a transport error");
@@ -196,7 +202,7 @@ test("all three failure classes are distinguishable at the endpoint", async () =
       const body = await (
         await fetch(`${t.base}/v1/send`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...t.auth },
           body: JSON.stringify({ bindingId: b.id, chatKey: "c", text: "x" }),
         })
       ).json();
@@ -216,13 +222,13 @@ test("a leg that declares outbound none refuses without pretending to try", asyn
   try {
     const res = await fetch(`${t.base}/v1/bindings`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ platform: "dead", credentials: { token: "t" }, subscriberUrl: "http://x.test/h" }),
     });
     const b = await res.json();
     const send = await fetch(`${t.base}/v1/send`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...t.auth },
       body: JSON.stringify({ bindingId: b.id, chatKey: "c", text: "x" }),
     });
     const body = await send.json();
@@ -269,21 +275,21 @@ test("bindings can be listed and retired — duplicates are a real failure mode"
     const a = await makeBinding(t);
     const b = await makeBinding(t);
 
-    const list = await (await fetch(`${t.base}/v1/bindings`)).json();
+    const list = await (await fetch(`${t.base}/v1/bindings`, { headers: t.auth })).json();
     assert.equal(list.length, 2, "both bindings are listed");
 
-    const del = await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE" });
+    const del = await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE", headers: t.auth });
     assert.equal(del.status, 200);
     assert.equal((await del.json()).ok, true);
 
-    const after = await (await fetch(`${t.base}/v1/bindings`)).json();
+    const after = await (await fetch(`${t.base}/v1/bindings`, { headers: t.auth })).json();
     assert.equal(after.length, 1, "the retired one is gone from the list");
     assert.equal(after[0].id, b.id);
 
     // Retiring twice is a 404, not a second side effect.
-    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE" })).status, 404);
+    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`, { method: "DELETE", headers: t.auth })).status, 404);
     // And a retired binding is not readable.
-    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`)).status, 404);
+    assert.equal((await fetch(`${t.base}/v1/bindings/${a.id}`, { headers: t.auth })).status, 404);
   } finally {
     await t.close();
   }

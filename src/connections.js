@@ -59,19 +59,29 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
     if (entry.started) return entry.state;
     entry.started = true;
     try {
-      await entry.transport.start?.((message) => {
-        entry.state = { ...entry.state, connected: true };
-        return ingest(binding, message).catch((err) =>
-          log.warn(`[ingest] binding ${binding.id}: ${err.message}`),
-        );
-      });
-      // A transport with no start() is a callback-only leg: it is reachable
+      await entry.transport.start?.(
+        (message) => {
+          entry.state = { ...entry.state, connected: true };
+          return ingest(binding, message).catch((err) =>
+            log.warn(`[ingest] binding ${binding.id}: ${err.message}`),
+          );
+        },
+        // The transport owns the truth about its socket. start() returning does
+        // NOT mean authenticated — a long-connection leg dials asynchronously and
+        // can fail its handshake seconds later. Without this callback the binding
+        // reported connected:true while the SDK was answering "websocket mode not
+        // enabled" (2026-11-21) — a green light on a dead leg.
+        (patch) => {
+          entry.state = { ...entry.state, ...patch };
+          onChange?.(binding.id, entry.state);
+        },
+      );
+      // A transport that never reports state (callback-only legs) is reachable
       // through the callback route, which is a different kind of "connected".
-      entry.state = {
-        connected: true,
-        inboundMode: binding.inboundMode,
-        error: null,
-      };
+      // A transport that DOES report keeps whatever it last said.
+      if (!entry.state.connected && entry.state.error === null && !entry.transport.reportsState) {
+        entry.state = { connected: true, inboundMode: binding.inboundMode, error: null };
+      }
     } catch (err) {
       entry.started = false;
       entry.state = { connected: false, inboundMode: binding.inboundMode, error: err.message };

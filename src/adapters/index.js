@@ -10,5 +10,6 @@ import feishu from "./feishu.js";
 import wecom from "./wecom.js";
 import wechatOa from "./wechat-oa.js";
 import wecomWebhook from "./wecom-webhook.js";
+import chatwoot from "./chatwoot.js";
 
-export const adapters = [wecomBot, telegram, slack, feishu, wecom, wechatOa, wecomWebhook];
+export const adapters = [wecomBot, telegram, slack, feishu, wecom, wechatOa, wecomWebhook, chatwoot];

@@ -15,7 +15,8 @@ import { createMediaTickets } from "./media.js";
  * @param {string} p.platform
  * @param {object} p.message   normalized by the adapter:
  *   { chatKey, senderId, senderName, text, media:[{kind,mime,bytes?}],
- *     platformMessageId, receivedAt? }
+ *     platformMessageId, receivedAt?, assignee?:{id,type}|null,
+ *     conversationStatus?:string|null }
  */
 export function buildEnvelope({ bindingId, platform, message, tickets }) {
   const msg = message ?? {};
@@ -49,6 +50,11 @@ export function buildEnvelope({ bindingId, platform, message, tickets }) {
     // Carried through verbatim when the platform payload has one. NEVER guessed:
     // a fabricated id would make an unrelated message look like a duplicate.
     platformMessageId,
+    // Copied verbatim when the platform mentions them, null otherwise. NEVER
+    // defaulted: a fabricated assignee or status would tell a consumer who is
+    // handling a conversation that nobody is.
+    assignee: msg.assignee ?? null,
+    conversationStatus: msg.conversationStatus ?? null,
     receivedAt: msg.receivedAt ?? Date.now(),
     raw: msg.raw ?? null,
   };

@@ -70,8 +70,10 @@ export function createTransport(binding, { createClient = (opts) => new AiBot.WS
 
   return {
     inboundMode: "long-connection",
+    // 本 transport 会自己上报连接状态；connections.js 据此不再假定「start 返回 = 连上了」。
+    reportsState: true,
 
-    async start(onMessage) {
+    async start(onMessage, onStateChange) {
       if (!botId || !secret) throw new Error("wecom-bot transport needs botId and secret");
       client = createClient({
         botId,
@@ -106,7 +108,20 @@ export function createTransport(binding, { createClient = (opts) => new AiBot.WS
           raw: null,
         });
       });
-      client.on("error", (err) => console.warn(`[wecom-bot] socket error: ${err?.message ?? err}`));
+      // Real connection state, from the SDK's own events. Without this the
+      // binding reports connected:true the instant start() returns — which is a
+      // LIE when authentication then fails (measured 2026-11-21: errcode 846601
+      // "websocket mode not enabled", while /v1/bindings said connected:true).
+      client.on("authenticated", () => onStateChange?.({ connected: true, error: null }));
+      client.on("disconnected", (reason) =>
+        onStateChange?.({ connected: false, error: `disconnected: ${reason}` }),
+      );
+      client.on("error", (err) => {
+        const msg = String(err?.message ?? err);
+        // Auth failure is terminal for this binding, not a transient blip.
+        if (/Authentication failed/i.test(msg)) onStateChange?.({ connected: false, error: msg.slice(0, 200) });
+        console.warn(`[wecom-bot] socket error: ${msg}`);
+      });
       client.connect();
     },
 

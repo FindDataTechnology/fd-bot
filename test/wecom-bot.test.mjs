@@ -207,3 +207,25 @@ test("chatType distinguishes a group from a direct message", async () => {
   assert.equal(got[0].chatType, "group");
   assert.equal(got[1].chatType, "single");
 });
+
+test("a failed authentication is reported as disconnected, not connected", async () => {
+  // Measured 2026-11-21: the binding said connected:true while the SDK was
+  // answering "846601 websocket mode not enabled". start() returning only means
+  // the dial was kicked off; the handshake happens later.
+  const { client } = stubClient();
+  const states = [];
+  const t = createTransport(binding, { createClient: () => client });
+  assert.equal(t.reportsState, true, "this transport owns the truth about its socket");
+  await t.start(() => {}, (patch) => states.push(patch));
+
+  client.emit("authenticated");
+  assert.deepEqual(states.at(-1), { connected: true, error: null });
+
+  client.emit("error", new Error("Authentication failed: websocket mode not enabled"));
+  const last = states.at(-1);
+  assert.equal(last.connected, false);
+  assert.match(last.error, /websocket mode not enabled/);
+
+  client.emit("disconnected", "code: 1006");
+  assert.equal(states.at(-1).connected, false);
+});

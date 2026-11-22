@@ -8,9 +8,45 @@
 // (contrast paas `bot_reply_windows`).
 
 export function createConnectionManager({ store, registry, acceptance, deliverer, buildEnvelope, tickets, log = console, onChange = null }) {
-  const entries = new Map(); // bindingId -> { transport, binding, state }
+  const entries = new Map(); // bindingId -> { transport, binding, state, backoffMs, reconnectTimer, stopped }
 
   const stateOf = (bindingId) => entries.get(bindingId)?.state ?? null;
+
+  // Auto-reconnect backoff, per binding. Starts small (a kick by a newer
+  // connection / a blip re-establishes in a second or two) and caps so a
+  // persistently-failing leg backs off instead of hammering the platform.
+  const RECONNECT_BASE_MS = Number(process.env.FD_BOT_RECONNECT_BASE_MS || 1000);
+  const RECONNECT_MAX_MS = Number(process.env.FD_BOT_RECONNECT_MAX_MS || 60000);
+  function scheduleReconnect(bindingId, entry, { skipBackoff = false } = {}) {
+    if (entry.stopped || entry.reconnectTimer) return;
+    const delay = skipBackoff ? RECONNECT_BASE_MS : entry.backoffMs;
+    entry.reconnectTimer = setTimeout(async () => {
+      entry.reconnectTimer = null;
+      // Re-read the binding: it may have been disabled or its creds rotated.
+      let fresh;
+      try {
+        fresh = await store.get(bindingId);
+      } catch (err) {
+        log.warn(`[conn] reconnect lookup failed for ${bindingId}: ${err.message}`);
+        fresh = null;
+      }
+      if (!fresh || fresh.disabledAt || entry.stopped) {
+        entries.delete(bindingId);
+        return;
+      }
+      // Grow the backoff for the NEXT drop; a successful reconnect resets it
+      // (the onStateChange connected:true handler clears backoffMs).
+      entry.backoffMs = Math.min(entry.backoffMs * 2, RECONNECT_MAX_MS);
+      log.info(`[conn] reconnecting ${bindingId} (${fresh.platform}) after drop`);
+      try {
+        await stopBinding(bindingId);
+        await startBinding(fresh);
+      } catch (err) {
+        log.warn(`[conn] reconnect of ${bindingId} failed: ${err.message}`);
+      }
+    }, delay);
+    entry.reconnectTimer?.unref?.();
+  }
 
   function adopt(binding) {
     const entry = entries.get(binding.id);
@@ -18,7 +54,7 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
     const adapter = registry.get(binding.platform);
     if (!adapter) throw new Error(`no adapter for platform "${binding.platform}"`);
     const transport = adapter.createTransport(binding);
-    const fresh = { transport, binding, started: false, state: { connected: false, inboundMode: binding.inboundMode, error: null } };
+    const fresh = { transport, binding, started: false, backoffMs: RECONNECT_BASE_MS, reconnectTimer: null, stopped: false, state: { connected: false, inboundMode: binding.inboundMode, error: null } };
     entries.set(binding.id, fresh);
     return fresh;
   }
@@ -73,7 +109,22 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
         // enabled" (2026-11-21) — a green light on a dead leg.
         (patch) => {
           entry.state = { ...entry.state, ...patch };
+          // A successful (re)connect resets the backoff so the next drop retries
+          // fast again.
+          if (patch.connected === true) entry.backoffMs = RECONNECT_BASE_MS;
           onChange?.(binding.id, entry.state);
+          // Auto-reconnect (2026-11-22): a long-connection leg can drop AFTER a
+          // successful start — kicked by a newer connection for the same bot
+          // ("server disconnected this connection"), a network blip, or expiry.
+          // The SDK does NOT redial on its own, and nothing called reconnect(),
+          // so the binding stayed dead until a pod restart (observed: WS down
+          // 12+ min, every send failing "WebSocket not connected"). When a
+          // state-reporting transport reports a drop, schedule a re-dial with
+          // exponential backoff. Guarded so it never storms and never revives a
+          // binding an operator disabled.
+          if (patch.connected === false && entry.transport.reportsState && !entry.stopped) {
+            scheduleReconnect(binding.id, entry);
+          }
         },
       );
       // A transport that never reports state (callback-only legs) is reachable
@@ -94,6 +145,14 @@ export function createConnectionManager({ store, registry, acceptance, deliverer
   async function stopBinding(bindingId) {
     const entry = entries.get(bindingId);
     if (!entry) return;
+    // Mark stopped BEFORE transport.stop(): the transport's close callback may
+    // fire a disconnected patch synchronously, and we must not schedule a
+    // reconnect for a binding we are deliberately stopping.
+    entry.stopped = true;
+    if (entry.reconnectTimer) {
+      clearTimeout(entry.reconnectTimer);
+      entry.reconnectTimer = null;
+    }
     try {
       await entry.transport.stop?.();
     } catch (err) {

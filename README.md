@@ -141,7 +141,7 @@ kubectl -n fd-bot create secret generic fd-bot-secrets \
 
 单副本 + `Recreate`：受理队列在 local-path PVC 上，两个 pod 会抢同一个目录。
 绑定在 PG（durable）；连接状态不持久——长连接自己重连，受理队列补发期间到达的消息。
-Pod 与 PG 都钉在 cheap-4（当日磁盘余量最大的一台）。
+Pod 与 PG 都钉在同一台工作节点（当日磁盘余量最大的一台，具体节点见运维台账）。
 
 端口 31915 在 `fd-infra-deploy/PORTS.md` 是**预留**值，apply 前须重做全集群枚举 + 节点 nc 双验。
 

@@ -1,7 +1,7 @@
 // Shared outbound HTTP: deadline-bound fetch. Ported from paas lib so the
 // transport's call discipline matches the rest of the fleet.
 // Platform API calls FROM A CHINA EGRESS take ~11s to slack.com (measured on
-// cheap-4, 2026-11-20: three of four attempts timed out at 10s, the fourth took
+// a china node, 2026-11-20: three of four attempts timed out at 10s, the fourth took
 // 10971ms). The default is therefore 30s for adapter calls — a 10s ceiling is a
 // guaranteed failure on this side of the Great Firewall, and the failure reads
 // as "the platform is down".
